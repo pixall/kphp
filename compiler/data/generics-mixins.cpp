@@ -4,6 +4,7 @@
 
 #include "compiler/data/generics-mixins.h"
 #include "compiler/data/function-data.h"
+#include "compiler/lexer.h"
 #include "compiler/phpdoc.h"
 #include "compiler/type-hint.h"
 #include "compiler/vertex.h"
@@ -11,6 +12,7 @@
 
 /*
  * How do template functions work.
+ * todo reconsider comment
  * 
  * "template functions" are functions marked with @kphp-template, which expresses `f<T>` with phpdoc at declaration.
  * Unlike regular functions, they can be called with various instances: `f($a)`, `f($b)`, etc., implicitly meaning `f<A>($a)` and so on.
@@ -74,7 +76,7 @@ static void create_from_phpdoc_old_syntax(FunctionPtr f, GenericsDeclarationMixi
         }
 
         kphp_error_return(!nameT.empty(), "invalid @kphp-template syntax");
-        out->add_itemT(nameT, extends_hint);
+        out->add_itemT(nameT, extends_hint ?: TypeHintPrimitive::create(tp_any));
         break;
       }
 
@@ -98,13 +100,37 @@ static void create_from_phpdoc_old_syntax(FunctionPtr f, GenericsDeclarationMixi
   kphp_assert(!f->generics_declaration->empty());
 }
 
-// a new syntax is @kphp-template T1 T2 with many @kphp-param tags
+// a new syntax is "@kphp-template T1, T2" with many @kphp-param tags describing params depending on T's
+// every T may have a where-condition: "T: callable" / "T: ClassName"
 static void create_from_phpdoc_new_syntax(FunctionPtr f, GenericsDeclarationMixin *out, const PhpDocComment *phpdoc) {
   for (const PhpDocTag &tag : phpdoc->tags) {
     switch (tag.type) {
       case PhpDocType::kphp_template:
-        for (auto s : split_skipping_delimeters(tag.value, " ")) {
-          out->add_itemT(static_cast<std::string>(s), nullptr);
+        for (auto s : split_skipping_delimeters(tag.value, ",")) {
+          vk::string_view v = vk::trim(s);
+          size_t pos_colon = v.find(':');
+
+          if (pos_colon == std::string::npos) {
+            // just "T" / "T1" / etc.
+            std::string nameT = static_cast<std::string>(v);
+            out->add_itemT(nameT, TypeHintPrimitive::create(tp_any));
+
+          } else {
+            // "T:callable" / "T:ClassName" / "T:SomeInterface"
+            std::string nameT = static_cast<std::string>(vk::trim(v.substr(0, pos_colon)));
+            vk::string_view extends_str = vk::trim(v.substr(pos_colon + 1));
+            const TypeHint *extends_hint = nullptr;
+
+            // todo support ClassName, support more options, maybe use real tokenizer
+            if (extends_str == "callable") {
+              extends_hint = TypeHintCallable::create_untyped_callable();
+            } else {
+              kphp_error(0, fmt_format("Invalid generics declaration syntax after '{}:'", nameT));
+              extends_hint = TypeHintPrimitive::create(tp_any);
+            }
+
+            out->add_itemT(nameT, extends_hint);
+          }
         }
         break;
 
@@ -144,6 +170,8 @@ bool GenericsDeclarationMixin::has_nameT(const std::string &nameT) const {
 }
 
 void GenericsDeclarationMixin::add_itemT(const std::string &nameT, const TypeHint *extends_hint) {
+  kphp_error_return(!nameT.empty(), "Invalid (empty) generics <T> in declaration");
+  kphp_error_return(!find(nameT), fmt_format("Duplicate generics <{}> in declaration", nameT));
   itemsT.emplace_back(GenericsItem{nameT, extends_hint});
 }
 
@@ -156,13 +184,59 @@ const TypeHint *GenericsDeclarationMixin::find(const std::string &nameT) const {
   return nullptr;
 }
 
+std::string GenericsDeclarationMixin::prompt_provide_types_human_readable(VertexPtr call) const {
+  std::string call_str = replace_characters(call->get_string(), '$', ':');
+  std::string params_str = call->size() > (call->extra_type == op_ex_func_call_arrow ? 1 : 0) ? "(...)" : "()";
+  std::string t_str = vk::join(itemsT, ", ", [](const GenericsItem &itemT) { return itemT.nameT; });
+  return "Please, provide all generics types using syntax " + call_str + "/*<" + t_str + ">*/" + params_str;
+}
 
-void GenericsInstantiationMixin::add_instantiationT(const std::string &nameT, const TypeHint *instantiation) {
+
+void GenericsInstantiationPhpComment::parse_php_comment(FunctionPtr current_function) {
+  PhpDocTypeHintParser parser(current_function);
+  std::vector<Token> tokens = phpdoc_to_tokens(raw_comment);
+  auto cur_tok = tokens.cbegin();
+
+  while (cur_tok != tokens.cend() && cur_tok->type() != tok_end) {
+    const TypeHint *type_hint = nullptr;
+    try {
+      type_hint = parser.parse_from_tokens(cur_tok);
+    } catch (std::runtime_error &ex) {
+      kphp_error_return(0, fmt_format("Could not parse generics instantiation: {}", ex.what()));
+    }
+
+    kphp_error_return(cur_tok->type() == tok_comma || cur_tok->type() == tok_end, "expected ','");
+    cur_tok++;
+    types.emplace_back(type_hint);
+  }
+}
+
+
+GenericsInstantiationMixin::GenericsInstantiationMixin(const GenericsInstantiationMixin &rhs) {
+  if (rhs.php_inst != nullptr) {
+    this->php_inst = new GenericsInstantiationPhpComment(*rhs.php_inst);
+  }
+}
+
+void GenericsInstantiationMixin::apply_from_php_comment(const GenericsDeclarationMixin *generics_declaration, VertexPtr call) {
+  kphp_assert(php_inst != nullptr && !php_inst->types.empty());
+
+  for (int i = 0; i < php_inst->types.size() && i < generics_declaration->size(); ++i) {
+    add_instantiationT(generics_declaration->itemsT[i].nameT, php_inst->types[i], call);
+  }
+
+  kphp_error(generics_declaration->size() == php_inst->types.size(),
+             fmt_format("Mismatch generics instantiation count: waiting {}, got {}", generics_declaration->size(), php_inst->types.size()));
+}
+
+void GenericsInstantiationMixin::add_instantiationT(const std::string &nameT, const TypeHint *instantiation, VertexPtr call) {
   auto insertion_result = instantiations.emplace(nameT, instantiation);
   if (!insertion_result.second) {
     const TypeHint *previous_inst = insertion_result.first->second;
+    FunctionPtr template_function = call.as<op_func_call>()->func_id;
     kphp_error(previous_inst == instantiation,
-               fmt_format("generics <{}> is both {} and {}", nameT, previous_inst->as_human_readable(), instantiation->as_human_readable()));
+               fmt_format("Couldn't reify generics <{}> for call: it's both {} and {}.\n{}",
+                          nameT, previous_inst->as_human_readable(), instantiation->as_human_readable(), template_function->generics_declaration->prompt_provide_types_human_readable(call)));
   }
 }
 
@@ -172,10 +246,10 @@ const TypeHint *GenericsInstantiationMixin::find(const std::string &nameT) const
 }
 
 std::string GenericsInstantiationMixin::generate_instantiated_func_name(FunctionPtr template_function) const {
-  // an instantiated function name will be "{original_name}$_${postfix}", where postfix = "T1$T2"
-  std::string name = template_function->name + "$_";
+  // an instantiated function name will be "{original_name}$_${postfix}", where postfix = "T1$_$T2"
+  std::string name = template_function->name;
   for (const auto &name_and_type : instantiations) {
-    name += "$";
+    name += "$_$";
     name += replace_non_alphanum(name_and_type.second->as_human_readable());
   }
   return name;

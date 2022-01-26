@@ -21,7 +21,7 @@
  *    and therefore pipes a newly-created function (an instantiated template function)
  */
 
-// when we have a call `f<T>(...)`, we generate a new function `f$_$T`,
+// when we have a call `f<T1, T2>(...)`, we generate a new function `f$_$T1$_$T2`,
 // which is not a template one, but an instantiated one
 static FunctionPtr instantiate_template_function(FunctionPtr template_function,
                                                  GenericsInstantiationMixin *generics_instantiation,
@@ -33,21 +33,23 @@ static FunctionPtr instantiate_template_function(FunctionPtr template_function,
   new_function->generics_instantiation = generics_instantiation;
   new_function->outer_function = template_function;
 
-  // typically, `f(T $obj)` doesn't restrict T, in fact it means `f<T : any>(T $obj)`, T has extends_hint = nullptr
+  // typically, `f(T $obj)` doesn't restrict T, in fact it means `f<T : any>(T $obj)`, T has extends_hint = tp_any
   // but `f(callable $c)` actually means `f<Callback1 : callable>(Callback1 $c)`, so Callback1 has extends_hint = callable
   // when real generics functions are done, we'll have a syntax to express `f<T : SomeInterface>(T $obj)`, for now we haven't
   for (const auto &generics_item : *template_function->generics_declaration) {
-    const TypeHint *instantiation_type = generics_instantiation->find(generics_item.nameT);
-    kphp_assert(instantiation_type);
+    const TypeHint *instantiation_T = generics_instantiation->find(generics_item.nameT);
+    kphp_assert(instantiation_T);
 
-    if (generics_item.extends_hint) {
-      if (generics_item.extends_hint->try_as<TypeHintCallable>()) {   // prevent f(1) and other non-callable instantiations
-        kphp_error(instantiation_type->try_as<TypeHintCallable>(),
-                   fmt_format("Invalid template instantiation: expected {} to be {}, but {} found",
-                              generics_item.nameT, TermStringFormat::paint_green(generics_item.extends_hint->as_human_readable()), TermStringFormat::paint_green(instantiation_type->as_human_readable())));
-      }
+    if (generics_item.extends_hint->try_as<TypeHintCallable>()) {   // prevent f(1) and other non-callable instantiations
+      kphp_error(instantiation_T->try_as<TypeHintCallable>(),
+                 fmt_format("Invalid generics instantiation: expected {} to be {}, but {} found",
+                            generics_item.nameT, TermStringFormat::paint_green(generics_item.extends_hint->as_human_readable()), TermStringFormat::paint_green(instantiation_T->as_human_readable())));
     }
   }
+
+  // replace all T inside a cloned function where it could potentially be:
+  // 1) in type_hint of params/return
+  // 2) in nested @var phpdocs and nested /*<T>*/ calls
 
   for (auto p : new_function->get_params()) {
     auto param = p.as<op_func_param>();
@@ -59,6 +61,25 @@ static FunctionPtr instantiate_template_function(FunctionPtr template_function,
   if (new_function->return_typehint && new_function->return_typehint->has_genericsT_inside()) {
     new_function->return_typehint = phpdoc_replace_genericsT_with_instantiation(new_function->return_typehint, generics_instantiation);
   }
+
+  std::function<void(VertexPtr)> repl_body = [&repl_body, generics_instantiation](VertexPtr root) {
+    if (auto as_phpdoc_var = root.try_as<op_phpdoc_var>()) {
+      as_phpdoc_var->type_hint = phpdoc_replace_genericsT_with_instantiation(as_phpdoc_var->type_hint, generics_instantiation);
+    } else if (auto as_call = root.try_as<op_func_call>()) {
+      if (as_call->instantiation_list) {
+        kphp_assert(as_call->instantiation_list->empty() && as_call->instantiation_list->php_inst);
+        as_call->instantiation_list = new GenericsInstantiationMixin(*as_call->instantiation_list);
+        for (auto &type_hint : as_call->instantiation_list->php_inst->types) {
+          type_hint = phpdoc_replace_genericsT_with_instantiation(type_hint, generics_instantiation);
+        }
+      }
+    }
+
+    for (auto child : *root) {
+      repl_body(child);
+    }
+  };
+  repl_body(new_function->root);
 
   return new_function;
 }
@@ -154,6 +175,7 @@ public:
     if (v_lambda->lambda_class) {   // while deducing types, we used this field to express inheritance from a typed callable
       kphp_assert(v_lambda->lambda_class->is_typed_callable_interface());
       inherit_lambda_class_from_typed_callable(c_lambda, v_lambda->lambda_class);
+      G->require_function(v_lambda->lambda_class->get_instance_method("__invoke")->function, function_stream);
     }
     v_lambda->lambda_class = c_lambda;
 

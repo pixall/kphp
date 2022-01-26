@@ -207,6 +207,12 @@ void LexerData::hack_last_tokens() {
     return;
   }
 
+  if (are_last_tokens(tok_tpl_instantiation)) {
+    if (!are_last_tokens(tok_func_name, tok_tpl_instantiation)) {
+      tokens.pop_back();
+    }
+  }
+
   if (are_last_tokens(tok_new, tok_func_name, except_token_tag<tok_oppar>{})) {
     Token t = tokens.back();
     tokens.pop_back();
@@ -919,6 +925,15 @@ bool TokenLexerComment::parse(LexerData *lexer_data) const {
       if (is_phpdoc) {
         lexer_data->add_token(0, tok_phpdoc, phpdoc_start, s);
       }
+    } else if (s[0] && s[1] && s[0] == '<') { // tpl instantiation: /*<T>*/
+      char const *inst_start = ++s;
+      while (s[0] && (s[0] != '*' || s[1] != '/')) {
+        s++;
+      }
+      if (s[-1] != '>') {
+        return TokenLexerError("Unclosed tpl instantiation: /*< must be ended by >*/").parse(lexer_data);
+      }
+      lexer_data->add_token(0, tok_tpl_instantiation, inst_start, s - 1);
     } else {
       while (s[0] && (s[0] != '*' || s[1] != '/')) {
         s++;

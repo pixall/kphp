@@ -12,7 +12,6 @@
 #include "compiler/data/class-data.h"
 #include "compiler/data/function-data.h"
 #include "compiler/data/src-file.h"
-#include "compiler/gentree.h"
 #include "compiler/phpdoc.h"
 #include "compiler/type-hint.h"
 #include "compiler/utils/string-utils.h"
@@ -67,6 +66,12 @@ public:
     // it couldn't be done before: generics T is distinguishable from class T only after @kphp-template parsing
     if (f_->has_var_tags_inside) {
       parse_inner_var_doc_tags(f_->root);
+    }
+
+    // besides @var, types can occur in a special generics providing php syntax: `f/*<T>*/()`
+    // parse such types; as for @var, only after it has been detected whether current function is a template one
+    if (f_->has_generics_inst_inside) {
+      parse_inner_generics_inst(f_->root);
     }
 
     // 1) check that all classes exists and are not traits in @param/@return
@@ -480,6 +485,25 @@ private:
 
     for (auto child : *root) {
       parse_inner_var_doc_tags(child);
+    }
+  }
+
+  void parse_inner_generics_inst(VertexPtr root) {
+    if (auto as_call = root.try_as<op_func_call>()) {
+      if (as_call->instantiation_list) {
+        stage::set_location(root->location);
+        kphp_assert(as_call->instantiation_list->php_inst);
+        as_call->instantiation_list->php_inst->parse_php_comment(f_);
+
+        for (auto &inst_type_hint : as_call->instantiation_list->php_inst->types) {
+          inst_type_hint = phpdoc_finalize_type_hint_and_resolve(inst_type_hint, f_);
+          kphp_error(inst_type_hint, fmt_format("Failed to parse /*<...>*/ inside {}", f_->as_human_readable()));
+        }
+      }
+    }
+
+    for (auto child : *root) {
+      parse_inner_generics_inst(child);
     }
   }
 

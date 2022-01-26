@@ -742,7 +742,7 @@ const TypeHint *phpdoc_finalize_type_hint_and_resolve(const TypeHint *type_hint,
     type_hint->traverse([](const TypeHint *child) {
       if (const auto *as_callable = child->try_as<TypeHintCallable>()) {
 
-        if (as_callable->is_typed_callable()) {
+        if (as_callable->is_typed_callable() && !as_callable->has_genericsT_inside()) {
           as_callable->get_interface();
         }
 

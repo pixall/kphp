@@ -277,6 +277,20 @@
     }
   },
   {
+    "comment": "/*<T>*/ — tpl instantiation",
+    "extras": [
+      "string"
+    ],
+    "name": "op_tpl_instantiation",
+    "base_name": "meta_op_base",
+    "props": {
+      "rl": "rl_op",
+      "cnst": "cnst_const_func",
+      "type": "common_op",
+      "str": "tpl instantiation"
+    }
+  },
+  {
     "comment": "a set of operations that construct the interpolated string result",
     "name": "op_string_build",
     "base_name": "meta_op_varg",

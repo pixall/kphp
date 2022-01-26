@@ -186,6 +186,7 @@ std::string debugTokenName(TokenType t) {
     {tok_private, "tok_private"},
     {tok_protected, "tok_protected"},
     {tok_phpdoc, "tok_phpdoc"},
+    {tok_tpl_instantiation, "tok_tpl_instantiation"},
     {tok_clone, "tok_clone"},
     {tok_instanceof, "tok_instanceof"},
     {tok_end, "tok_end"},

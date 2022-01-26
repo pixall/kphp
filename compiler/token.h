@@ -182,6 +182,7 @@ enum TokenType {
   tok_protected,
 
   tok_phpdoc,
+  tok_tpl_instantiation,
 
   tok_clone,
   tok_instanceof,

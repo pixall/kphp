@@ -107,8 +107,9 @@ public:
   bool is_virtual_method = false;
   bool is_overridden_method = false;
   bool is_no_return = false;
-  bool has_lambdas_inside = false;      // used for optimization after cloning (not to launch CloneNestedLambdasPass)
-  bool has_var_tags_inside = false;     // used for optimization (not to traverse body when applying phpdoc if no @var inside)
+  bool has_lambdas_inside = false;        // used for optimization after cloning (not to launch CloneNestedLambdasPass)
+  bool has_var_tags_inside = false;       // used for optimization (not to traverse body if no @var inside)
+  bool has_generics_inst_inside = false;  // used for optimization (not to traverse body if no /*<...>*/ inside)
   bool warn_unused_result = false;
   bool is_flatten = false;
   bool is_pure = false;

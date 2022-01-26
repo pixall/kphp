@@ -215,6 +215,12 @@ VertexAdaptor<Op> GenTree::get_func_call() {
   std::string name{cur->str_val};
   next_cur();
 
+  vk::string_view php_comment_inst;
+  if (Op == op_func_call && test_expect(tok_tpl_instantiation)) {
+    php_comment_inst = cur->str_val;
+    next_cur();
+  }
+
   CE (expect(tok_oppar, "'('"));
   skip_phpdoc_tokens();
   std::vector<VertexPtr> next;
@@ -226,6 +232,14 @@ VertexAdaptor<Op> GenTree::get_func_call() {
 
   if (call->has_get_string()) {
     call->set_string(name);
+  }
+  if constexpr (Op == op_func_call) {
+    if (!php_comment_inst.empty()) {
+      call->instantiation_list = new GenericsInstantiationMixin;
+      call->instantiation_list->location = call->location;
+      call->instantiation_list->php_inst = new GenericsInstantiationPhpComment(php_comment_inst);
+      cur_function->has_generics_inst_inside = true;
+    }
   }
   return call;
 }
@@ -585,7 +599,7 @@ VertexPtr GenTree::get_expr_top(bool was_arrow, const PhpDocComment *phpdoc) {
     }
     case tok_func_name: {
       cur++;
-      if (!test_expect(tok_oppar)) {
+      if (!test_expect(tok_oppar) && !test_expect(tok_tpl_instantiation)) {
         if (!was_arrow && vk::any_of_equal(op->str_val, "die", "exit")) { // can be called without "()"
           res = get_vertex_with_str_val(VertexAdaptor<op_func_call>{}, static_cast<std::string>(op->str_val));
         } else {
@@ -1731,10 +1745,11 @@ VertexPtr GenTree::process_arrow(VertexPtr lhs, VertexPtr rhs) {
     inst_prop->str_val = rhs->get_string();
     return inst_prop;
 
-  } else if (rhs->type() == op_func_call) {
-    auto new_root = VertexAdaptor<op_func_call>::create(lhs, rhs.as<op_func_call>()->args());
+  } else if (auto as_func_call = rhs.try_as<op_func_call>()) {
+    auto new_root = VertexAdaptor<op_func_call>::create(lhs, as_func_call->args());
     new_root->extra_type = op_ex_func_call_arrow;
-    new_root->str_val = rhs->get_string();
+    new_root->str_val = as_func_call->str_val;
+    new_root->instantiation_list = as_func_call->instantiation_list;
     return new_root;
 
   } else {
