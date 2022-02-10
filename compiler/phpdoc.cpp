@@ -396,6 +396,9 @@ const TypeHint *PhpDocTypeHintParser::parse_simple_type() {
       return TypeHintOptional::create(parse_type_expression(), true, false);
     case tok_object:
       cur_tok++;
+      if (vk::any_of_equal(cur_tok->type(), tok_lt, tok_oppar)) {   // object<...>
+        return TypeHintObject::create(parse_nested_one_type_hint());
+      }
       return TypeHintPrimitive::create(tp_any);
 
     case tok_static:

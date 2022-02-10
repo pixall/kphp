@@ -13,6 +13,74 @@
 #include "compiler/type-hint.h"
 #include "compiler/pipes/clone-nested-lambdas.h"
 
+class InstantiateTemplateFunctionPass final : public FunctionPassBase {
+public:
+  string get_description() override {
+    return "Instantiate template function";
+  }
+
+  void on_start() override {
+    kphp_assert(current_function->generics_instantiation);
+    kphp_assert(current_function->outer_function && current_function->outer_function->generics_declaration);
+  }
+
+  VertexPtr on_enter_vertex(VertexPtr root) override {
+    if (auto as_phpdoc_var = root.try_as<op_phpdoc_var>()) {
+      as_phpdoc_var->type_hint = phpdoc_replace_genericsT_with_instantiation(as_phpdoc_var->type_hint, current_function->generics_instantiation);
+
+    } else if (auto as_call = root.try_as<op_func_call>()) {
+      if (as_call->instantiation_list) {
+        kphp_assert(as_call->instantiation_list->empty() && as_call->instantiation_list->php_inst);
+        as_call->instantiation_list = new GenericsInstantiationMixin(*as_call->instantiation_list);
+        for (auto &type_hint : as_call->instantiation_list->php_inst->types) {
+          type_hint = phpdoc_replace_genericsT_with_instantiation(type_hint, current_function->generics_instantiation);
+        }
+
+      } else if (as_call->extra_type != op_ex_func_call_arrow && as_call->str_val == "typeof") {
+        VertexPtr arg = as_call->size() == 1 ? as_call->args().front() : VertexPtr{};
+        auto param = current_function->outer_function->find_param_by_name(arg && arg->type() == op_var ? arg->get_string() : "");
+        kphp_error_act(param && param->type_hint && param->type_hint->has_genericsT_inside(),
+                       "typeof() is applicable only for a template parameter", return root);
+        
+        const TypeHint *instantiation_hint = current_function->find_param_by_name(arg->get_string())->type_hint;
+        if (const auto *provided_instance = instantiation_hint->try_as<TypeHintInstance>()) {
+          auto repl = VertexAdaptor<op_string>::create();
+          repl->str_val = provided_instance->full_class_name;
+          return repl;
+        }
+        kphp_error(0, "typeof() used for non-instance");
+      }
+
+    } else if (auto as_var = root.try_as<op_var>()) {
+      auto param = current_function->outer_function->find_param_by_name(as_var->str_val);
+      if (param && param->type_hint && param->type_hint->has_genericsT_inside()) {
+        if (const auto *as_genericsT = param->type_hint->try_as<TypeHintGenericsT>()) {
+          const TypeHint *extends_hint = current_function->outer_function->generics_declaration->find(as_genericsT->nameT);
+          if (extends_hint->try_as<TypeHintConstexprSymbol>()) {
+            const TypeHint *instantiation_hint = current_function->find_param_by_name(as_var->str_val)->type_hint;
+            if (const auto *provided_symbol = instantiation_hint->try_as<TypeHintConstexprSymbol>()) {
+              auto repl = VertexAdaptor<op_string>::create();
+              repl->str_val = provided_symbol->constexpr_value;
+              return repl;
+            }
+          }
+        }
+      }
+    }
+
+    return root;
+  }
+
+  bool user_recursion(VertexPtr root)
+  override {
+    if (root->type() == op_func_param_list) {
+      return true;
+    }
+
+    return false;
+  }
+};
+
 /*
  * This pass creates new functions and passes them backwards to be handled again:
  * 1) it generates lambda classes for every op_lambda,
@@ -45,6 +113,11 @@ static FunctionPtr instantiate_template_function(FunctionPtr template_function,
                  fmt_format("Invalid generics instantiation: expected {} to be {}, but {} found",
                             generics_item.nameT, TermStringFormat::paint_green(generics_item.extends_hint->as_human_readable()), TermStringFormat::paint_green(instantiation_T->as_human_readable())));
     }
+    if (generics_item.extends_hint->try_as<TypeHintConstexprSymbol>()) {
+      kphp_error(instantiation_T->try_as<TypeHintConstexprSymbol>(),
+                 fmt_format("Invalid generics instantiation: expected {} to be a constexpr string",
+                            generics_item.nameT));
+    }
   }
 
   // replace all T inside a cloned function where it could potentially be:
@@ -62,24 +135,8 @@ static FunctionPtr instantiate_template_function(FunctionPtr template_function,
     new_function->return_typehint = phpdoc_replace_genericsT_with_instantiation(new_function->return_typehint, generics_instantiation);
   }
 
-  std::function<void(VertexPtr)> repl_body = [&repl_body, generics_instantiation](VertexPtr root) {
-    if (auto as_phpdoc_var = root.try_as<op_phpdoc_var>()) {
-      as_phpdoc_var->type_hint = phpdoc_replace_genericsT_with_instantiation(as_phpdoc_var->type_hint, generics_instantiation);
-    } else if (auto as_call = root.try_as<op_func_call>()) {
-      if (as_call->instantiation_list) {
-        kphp_assert(as_call->instantiation_list->empty() && as_call->instantiation_list->php_inst);
-        as_call->instantiation_list = new GenericsInstantiationMixin(*as_call->instantiation_list);
-        for (auto &type_hint : as_call->instantiation_list->php_inst->types) {
-          type_hint = phpdoc_replace_genericsT_with_instantiation(type_hint, generics_instantiation);
-        }
-      }
-    }
-
-    for (auto child : *root) {
-      repl_body(child);
-    }
-  };
-  repl_body(new_function->root);
+  InstantiateTemplateFunctionPass pass;
+  run_function_pass(new_function, &pass);
 
   return new_function;
 }

@@ -220,3 +220,12 @@ void TypeHintGenericsT::recalc_type_data_in_context_of_call(TypeData *dst, Verte
   kphp_assert(0 && "genericsT not instantiated before type inferring");
 }
 
+void TypeHintObject::recalc_type_data_in_context_of_call(TypeData *dst, VertexPtr call __attribute__ ((unused))) const {
+  dst->set_lca(tp_Error);
+  kphp_assert(0 && "object<T> not instantiated before type inferring");
+}
+
+void TypeHintConstexprSymbol::recalc_type_data_in_context_of_call(TypeData *dst, VertexPtr call __attribute__ ((unused))) const {
+  dst->set_ptype(tp_string);
+}
+

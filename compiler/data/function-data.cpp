@@ -185,7 +185,10 @@ std::string FunctionData::as_human_readable(bool add_details) const {
   } else if (generics_instantiation && outer_function) {
     result_name = outer_function->as_human_readable(add_details);
     result_name.erase(result_name.find('<'));
-    result_name += "<" + vk::join(*generics_instantiation, ",", [](const auto &pair) { return pair.second->as_human_readable(); }) + ">";
+    result_name += "<" + vk::join(*outer_function->generics_declaration, ", ", [this](const GenericsDeclarationMixin::GenericsItem &item) {
+      const TypeHint *itemT = generics_instantiation->find(item.nameT);
+      return itemT == nullptr ? "nullptr" : itemT->as_human_readable();
+    }) + ">";
     if (add_details) {
       SrcFilePtr file = generics_instantiation->location.get_file();
       std::string line = std::to_string(generics_instantiation->location.line);

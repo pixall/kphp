@@ -624,6 +624,8 @@ void FinalCheckPass::check_op_func_call(VertexAdaptor<op_func_call> call) {
       const TypeData *arg_type = tinf::get_type(call->args()[0]);
       kphp_error(arg_type->can_store_null(),
                  fmt_format("is_null() will be always false for {}", arg_type->as_human_readable()));
+    } else if (function_name == "typeof") {
+      kphp_error(0, "used typeof() for a non-template argument");   // this func call should have been replaced
     } else if (vk::string_view{function_name}.starts_with("rpc_tl_query")) {
       G->set_untyped_rpc_tl_used();
     } else if (vk::string_view{function_name}.starts_with("FFI$$")) {

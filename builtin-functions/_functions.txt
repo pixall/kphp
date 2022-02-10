@@ -1294,6 +1294,8 @@ function profiler_set_log_suffix($suffix ::: string) ::: void;
 function profiler_set_function_label($label ::: string) ::: void;
 function profiler_is_enabled() ::: bool;
 
+function typeof($object ::: any) ::: string;
+
 /** Job workers interface **/
 
 /** @kphp-immutable-class */

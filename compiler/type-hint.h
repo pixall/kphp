@@ -517,3 +517,46 @@ public:
   const TypeHint *replace_children_custom(const ReplacerCallbackT &callback) const final;
   void recalc_type_data_in_context_of_call(TypeData *dst, VertexPtr func_call) const final;
 };
+
+/**
+ * Widely used in generics functions, which accept "T:class" and return object<T>:
+ * object<T> is kept as is (while T is generics), object<A> is replaced with just A (see create()).
+ */
+class TypeHintObject : public TypeHint {
+  explicit TypeHintObject(const TypeHint *inner)
+    : TypeHint(flag_contains_genericsT_inside)
+    , inner(inner) {}
+
+public:
+  const TypeHint *inner;
+
+  static const TypeHint *create(const TypeHint *inner);
+
+  std::string as_human_readable() const final;
+  void traverse(const TraverserCallbackT &callback) const final;
+  const TypeHint *replace_self_static_parent(FunctionPtr resolve_context) const final;
+  const TypeHint *replace_children_custom(const ReplacerCallbackT &callback) const final;
+  void recalc_type_data_in_context_of_call(TypeData *dst, VertexPtr func_call) const final;
+};
+
+/**
+ * Used in genericsT to describe "T:class" and an exact string "A::class" provided as instantiation.
+ * For declaration f<T:class>, T's extends_hint is "some constexpr symbol" (empty).
+ * For instantiation f<A::class>, T = 'A'.
+ */
+class TypeHintConstexprSymbol : public TypeHint {
+  explicit TypeHintConstexprSymbol(std::string constexpr_value)
+    : TypeHint(0)
+    , constexpr_value(std::move(constexpr_value)) {}
+
+public:
+  std::string constexpr_value;
+
+  static const TypeHint *create(const std::string &constexpr_value);
+
+  std::string as_human_readable() const final;
+  void traverse(const TraverserCallbackT &callback) const final;
+  const TypeHint *replace_self_static_parent(FunctionPtr resolve_context) const final;
+  const TypeHint *replace_children_custom(const ReplacerCallbackT &callback) const final;
+  void recalc_type_data_in_context_of_call(TypeData *dst, VertexPtr func_call) const final;
+};

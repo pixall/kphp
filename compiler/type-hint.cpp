@@ -372,6 +372,33 @@ const TypeHint *TypeHintGenericsT::create(const std::string &nameT) {
   );
 }
 
+const TypeHint *TypeHintObject::create(const TypeHint *inner) {
+  if (!inner->has_genericsT_inside()) {
+    if (inner->try_as<TypeHintInstance>()) {
+      return inner;
+    }
+    if (const auto *as_symbol = inner->try_as<TypeHintConstexprSymbol>()) {
+      return TypeHintInstance::create(as_symbol->constexpr_value);
+    }
+  }
+
+  HasherOfTypeHintForOptimization hash(1539395891268319126ULL);
+  hash.feed_inner(inner);
+
+  return hash.get_existing() ?: hash.add_because_doesnt_exist(
+    new TypeHintObject(inner)
+  );
+}
+
+const TypeHint *TypeHintConstexprSymbol::create(const std::string &constexpr_value) {
+  HasherOfTypeHintForOptimization hash(2914531788341198112ULL);
+  hash.feed_string(constexpr_value);
+
+  return hash.get_existing() ?: hash.add_because_doesnt_exist(
+    new TypeHintConstexprSymbol(constexpr_value)
+  );
+}
+
 
 // --------------------------------------------
 //    as_human_readable()
@@ -383,11 +410,11 @@ std::string TypeHintArgRef::as_human_readable() const {
 }
 
 std::string TypeHintArgRefCallbackCall::as_human_readable() const {
-  return std::to_string(arg_num) + "()";
+  return "^" + std::to_string(arg_num) + "()";
 }
 
 std::string TypeHintArgRefInstance::as_human_readable() const {
-  return "instance<" + std::to_string(arg_num) + ">";
+  return "instance<^" + std::to_string(arg_num) + ">";
 }
 
 std::string TypeHintArgSubkeyGet::as_human_readable() const {
@@ -452,6 +479,14 @@ std::string TypeHintTuple::as_human_readable() const {
 
 std::string TypeHintGenericsT::as_human_readable() const {
   return nameT;
+}
+
+std::string TypeHintObject::as_human_readable() const {
+  return "object<" + inner->as_human_readable() + ">";
+}
+
+std::string TypeHintConstexprSymbol::as_human_readable() const {
+  return constexpr_value.empty() ? "(symbol)" : "'" + constexpr_value + "'";
 }
 
 
@@ -552,6 +587,15 @@ void TypeHintGenericsT::traverse(const TypeHint::TraverserCallbackT &callback) c
   callback(this);
 }
 
+void TypeHintObject::traverse(const TypeHint::TraverserCallbackT &callback) const {
+  callback(this);
+  inner->traverse(callback);
+}
+
+void TypeHintConstexprSymbol::traverse(const TypeHint::TraverserCallbackT &callback) const {
+  callback(this);
+}
+
 
 // --------------------------------------------
 //    replace_self_static_parent()
@@ -636,6 +680,14 @@ const TypeHint *TypeHintTuple::replace_self_static_parent(FunctionPtr resolve_co
 }
 
 const TypeHint *TypeHintGenericsT::replace_self_static_parent(FunctionPtr resolve_context __attribute__ ((unused))) const {
+  return this;
+}
+
+const TypeHint *TypeHintObject::replace_self_static_parent(FunctionPtr resolve_context) const {
+  return create(inner->replace_self_static_parent(resolve_context));
+}
+
+const TypeHint *TypeHintConstexprSymbol::replace_self_static_parent(FunctionPtr resolve_context __attribute__ ((unused))) const {
   return this;
 }
 
@@ -724,6 +776,14 @@ const TypeHint *TypeHintTuple::replace_children_custom(const ReplacerCallbackT &
 }
 
 const TypeHint *TypeHintGenericsT::replace_children_custom(const ReplacerCallbackT &callback) const {
+  return callback(this);
+}
+
+const TypeHint *TypeHintObject::replace_children_custom(const ReplacerCallbackT &callback) const {
+  return callback(create(inner->replace_children_custom(callback)));
+}
+
+const TypeHint *TypeHintConstexprSymbol::replace_children_custom(const ReplacerCallbackT &callback) const {
   return callback(this);
 }
 

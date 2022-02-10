@@ -321,12 +321,21 @@ static void reify_genericsT_from_call_argument(FunctionPtr template_function, co
   if (const auto *as_genericsT = type_hint->try_as<TypeHintGenericsT>()) {
     const std::string &nameT = type_hint->try_as<TypeHintGenericsT>()->nameT;
     const TypeHint *extends_hint = template_function->generics_declaration->find(as_genericsT->nameT);
+    const TypeHint *instantiation_hint = nullptr;
+
     if (extends_hint->try_as<TypeHintCallable>()) {
       patch_rhs_casting_to_lhs_type(call_arg, extends_hint, call);
     }
+    if (extends_hint->try_as<TypeHintConstexprSymbol>()) {
+      // todo
+      const std::string *v = GenTree::get_constexpr_string(call_arg);
+      kphp_error_return(v, "not a constexpr string");
+      instantiation_hint = TypeHintConstexprSymbol::create(*v);
+    }
 
-    Assumption assumption = assume_class_of_expr(current_function, call_arg, call);
-    const TypeHint *instantiation_hint = assumption.assum_hint;
+    if (!instantiation_hint) {
+      instantiation_hint = assume_class_of_expr(current_function, call_arg, call).assum_hint;
+    }
     // todo: we'd better not auto-instantiate tp_any if can't detect an instance
     // when I fix all vkcom issues, I'll drop this behavior
     if (!instantiation_hint && use_tp_any) {
@@ -339,13 +348,11 @@ static void reify_genericsT_from_call_argument(FunctionPtr template_function, co
   }
 
   if (const auto *as_array = type_hint->try_as<TypeHintArray>()) {
-    if (auto arg_as_array = call_arg.try_as<op_array>()) {
-      for (auto &item : *arg_as_array) {
-        if (auto as_double_arrow = item.try_as<op_double_arrow>()) {
-          reify_genericsT_from_call_argument(template_function, as_array->inner, call, as_double_arrow->value(), current_function);
-        } else {
-          reify_genericsT_from_call_argument(template_function, as_array->inner, call, item, current_function);
-        }
+    Assumption arg_assum = assume_class_of_expr(current_function, call_arg, call);
+    if (arg_assum && arg_assum.assum_hint->try_as<TypeHintArray>()) {
+      if (const auto *as_genericsT = as_array->inner->try_as<TypeHintGenericsT>()) {
+        const std::string &nameT = as_genericsT->nameT;
+        call->instantiation_list->add_instantiationT(nameT, arg_assum.assum_hint->try_as<TypeHintArray>()->inner, call);
       }
     }
   }

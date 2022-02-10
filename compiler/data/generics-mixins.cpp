@@ -101,7 +101,7 @@ static void create_from_phpdoc_old_syntax(FunctionPtr f, GenericsDeclarationMixi
 }
 
 // a new syntax is "@kphp-template T1, T2" with many @kphp-param tags describing params depending on T's
-// every T may have a where-condition: "T: callable" / "T: ClassName"
+// every T may have a where-condition: "T: callable" / "T: class"
 static void create_from_phpdoc_new_syntax(FunctionPtr f, GenericsDeclarationMixin *out, const PhpDocComment *phpdoc) {
   for (const PhpDocTag &tag : phpdoc->tags) {
     switch (tag.type) {
@@ -116,14 +116,15 @@ static void create_from_phpdoc_new_syntax(FunctionPtr f, GenericsDeclarationMixi
             out->add_itemT(nameT, TypeHintPrimitive::create(tp_any));
 
           } else {
-            // "T:callable" / "T:ClassName" / "T:SomeInterface"
+            // "T:callable" / "T:class" / "T:SomeInterface"
             std::string nameT = static_cast<std::string>(vk::trim(v.substr(0, pos_colon)));
             vk::string_view extends_str = vk::trim(v.substr(pos_colon + 1));
             const TypeHint *extends_hint = nullptr;
 
-            // todo support ClassName, support more options, maybe use real tokenizer
             if (extends_str == "callable") {
               extends_hint = TypeHintCallable::create_untyped_callable();
+            } else if (extends_str == "class" || extends_str == "symbol") {
+              extends_hint = TypeHintConstexprSymbol::create("");
             } else {
               kphp_error(0, fmt_format("Invalid generics declaration syntax after '{}:'", nameT));
               extends_hint = TypeHintPrimitive::create(tp_any);
