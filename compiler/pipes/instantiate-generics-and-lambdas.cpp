@@ -8,64 +8,73 @@
 #include "compiler/data/class-data.h"
 #include "compiler/data/function-data.h"
 #include "compiler/data/generics-mixins.h"
+#include "compiler/gentree.h"
 #include "compiler/lambda-utils.h"
 #include "compiler/phpdoc.h"
 #include "compiler/type-hint.h"
 #include "compiler/pipes/clone-nested-lambdas.h"
 
 class InstantiateTemplateFunctionPass final : public FunctionPassBase {
+  FunctionPtr template_function;
+  const GenericsInstantiationMixin *generics_instantiation;
+
 public:
-  string get_description() override {
-    return "Instantiate template function";
+  InstantiateTemplateFunctionPass(FunctionPtr instantiated_function, FunctionPtr template_function)
+    : template_function(template_function)
+    , generics_instantiation(instantiated_function->generics_instantiation) {
+    kphp_assert(instantiated_function->generics_instantiation);
+    kphp_assert(template_function->generics_declaration);
   }
 
-  void on_start() override {
-    kphp_assert(current_function->generics_instantiation);
-    kphp_assert(current_function->outer_function && current_function->outer_function->generics_declaration);
+  std::string get_description() override {
+    return "Instantiate template function";
   }
 
   VertexPtr on_enter_vertex(VertexPtr root) override {
     if (auto as_phpdoc_var = root.try_as<op_phpdoc_var>()) {
-      as_phpdoc_var->type_hint = phpdoc_replace_genericsT_with_instantiation(as_phpdoc_var->type_hint, current_function->generics_instantiation);
+      as_phpdoc_var->type_hint = phpdoc_replace_genericsT_with_instantiation(as_phpdoc_var->type_hint, generics_instantiation);
 
     } else if (auto as_call = root.try_as<op_func_call>()) {
       if (as_call->instantiation_list) {
         kphp_assert(as_call->instantiation_list->empty() && as_call->instantiation_list->php_inst);
         as_call->instantiation_list = new GenericsInstantiationMixin(*as_call->instantiation_list);
         for (auto &type_hint : as_call->instantiation_list->php_inst->types) {
-          type_hint = phpdoc_replace_genericsT_with_instantiation(type_hint, current_function->generics_instantiation);
+          type_hint = phpdoc_replace_genericsT_with_instantiation(type_hint, generics_instantiation);
         }
 
       } else if (as_call->extra_type != op_ex_func_call_arrow && as_call->str_val == "typeof") {
         VertexPtr arg = as_call->size() == 1 ? as_call->args().front() : VertexPtr{};
-        auto param = current_function->outer_function->find_param_by_name(arg && arg->type() == op_var ? arg->get_string() : "");
+        auto param = template_function->find_param_by_name(arg && arg->type() == op_var ? arg->get_string() : "");
         kphp_error_act(param && param->type_hint && param->type_hint->has_genericsT_inside(),
                        "typeof() is applicable only for a template parameter", return root);
-        
-        const TypeHint *instantiation_hint = current_function->find_param_by_name(arg->get_string())->type_hint;
-        if (const auto *provided_instance = instantiation_hint->try_as<TypeHintInstance>()) {
-          auto repl = VertexAdaptor<op_string>::create();
-          repl->str_val = provided_instance->full_class_name;
-          return repl;
+
+        auto inst_param = find_param_by_name(arg->get_string());
+        if (inst_param) {
+          if (const auto *provided_instance = inst_param->type_hint->try_as<TypeHintInstance>()) {
+            return GenTree::create_string_const(provided_instance->full_class_name);
+          }
         }
-        kphp_error(0, "typeof() used for non-instance");
+        kphp_error(0, "typeof() can be used for instances only");
       }
 
     } else if (auto as_var = root.try_as<op_var>()) {
-      auto param = current_function->outer_function->find_param_by_name(as_var->str_val);
+      auto param = template_function->find_param_by_name(as_var->str_val);
       if (param && param->type_hint && param->type_hint->has_genericsT_inside()) {
         if (const auto *as_genericsT = param->type_hint->try_as<TypeHintGenericsT>()) {
-          const TypeHint *extends_hint = current_function->outer_function->generics_declaration->find(as_genericsT->nameT);
+          const TypeHint *extends_hint = template_function->generics_declaration->find(as_genericsT->nameT);
           if (extends_hint->try_as<TypeHintConstexprSymbol>()) {
-            const TypeHint *instantiation_hint = current_function->find_param_by_name(as_var->str_val)->type_hint;
-            if (const auto *provided_symbol = instantiation_hint->try_as<TypeHintConstexprSymbol>()) {
-              auto repl = VertexAdaptor<op_string>::create();
-              repl->str_val = provided_symbol->constexpr_value;
-              return repl;
+            auto inst_param = find_param_by_name(as_var->str_val);
+            if (inst_param) {
+              if (const auto *provided_symbol = inst_param->type_hint->try_as<TypeHintConstexprSymbol>()) {
+                return GenTree::create_string_const(provided_symbol->constexpr_value);
+              }
             }
           }
         }
       }
+
+    } else if (auto as_op_lambda = root.try_as<op_lambda>()) {
+      run_function_pass(as_op_lambda->func_id, this);
     }
 
     return root;
@@ -78,6 +87,19 @@ public:
     }
 
     return false;
+  }
+
+  VertexAdaptor<op_func_param> find_param_by_name(const std::string &var_name) {
+    FunctionPtr outer_function = current_function;
+    while (outer_function->is_lambda()) {
+      bool is_used = std::find_if(outer_function->uses_list.begin(), outer_function->uses_list.end(),
+                                  [var_name](auto v_use) { return v_use->str_val == var_name; }) != outer_function->uses_list.end();
+      if (!is_used) {
+        return {};
+      }
+      outer_function = outer_function->outer_function;
+    }
+    return outer_function->find_param_by_name(var_name);
   }
 };
 
@@ -135,7 +157,7 @@ static FunctionPtr instantiate_template_function(FunctionPtr template_function,
     new_function->return_typehint = phpdoc_replace_genericsT_with_instantiation(new_function->return_typehint, generics_instantiation);
   }
 
-  InstantiateTemplateFunctionPass pass;
+  InstantiateTemplateFunctionPass pass(new_function, template_function);
   run_function_pass(new_function, &pass);
 
   return new_function;

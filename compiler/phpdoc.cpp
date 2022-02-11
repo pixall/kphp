@@ -218,7 +218,7 @@ const TypeHint *PhpDocTypeHintParser::parse_classname(const std::string &phpdoc_
   if (is_string_self_static_parent(phpdoc_class_name)) {
     return TypeHintInstance::create(phpdoc_class_name);
   }
-  if (current_function->generics_declaration && current_function->generics_declaration->has_nameT(phpdoc_class_name)) {
+  if (current_function->get_this_or_topmost_if_lambda()->is_template() && current_function->get_this_or_topmost_if_lambda()->generics_declaration->has_nameT(phpdoc_class_name)) {
     return TypeHintGenericsT::create(phpdoc_class_name);
   }
   return TypeHintInstance::create(resolve_uses(current_function, phpdoc_class_name));
