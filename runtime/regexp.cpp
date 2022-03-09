@@ -65,7 +65,6 @@ void regexp::check_pattern_compilation_warning() const noexcept {
 }
 
 bool regexp::is_valid_RE2_regexp(const char *regexp_string, int64_t regexp_len, bool is_utf8, const char *function, const char *file) noexcept {
-//  return false;
   int64_t brackets_depth = 0;
   bool prev_is_group = false;
 

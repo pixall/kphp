@@ -274,6 +274,7 @@ inline char *simd_int64_to_string(int64_t value, char *out_buffer) {
 // todo anyone who wants to practice some low-level magic — welcome to implement a proper SIMD form with ARM intrinsics
 #include <cstdint>
 #include <cstdio>
+#include <inttypes.h>
 
 inline char *simd_uint32_to_string(uint32_t value, char *out_buffer) noexcept {
   int n = sprintf(out_buffer, "%u", value);
@@ -286,12 +287,12 @@ inline char *simd_int32_to_string(int32_t value, char *out_buffer) noexcept {
 }
 
 inline char *simd_uint64_to_string(uint64_t value, char *out_buffer) {
-  int n = sprintf(out_buffer, "%llu", value);
+  int n = sprintf(out_buffer, "%" PRIu64, value);
   return out_buffer + n;
 }
 
 inline char *simd_int64_to_string(int64_t value, char *out_buffer) {
-  int n = sprintf(out_buffer, "%lld", value);
+  int n = sprintf(out_buffer, "%" PRId64, value);
   return out_buffer + n;
 }
 
