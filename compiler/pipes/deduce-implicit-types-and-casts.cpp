@@ -326,12 +326,6 @@ static void reify_genericsT_from_call_argument(FunctionPtr template_function, co
     if (extends_hint->try_as<TypeHintCallable>()) {
       patch_rhs_casting_to_lhs_type(call_arg, extends_hint, call);
     }
-    if (extends_hint->try_as<TypeHintConstexprSymbol>()) {
-      // todo
-      const std::string *v = GenTree::get_constexpr_string(call_arg);
-      kphp_error_return(v, "not a constexpr string");
-      instantiation_hint = TypeHintConstexprSymbol::create(*v);
-    }
 
     if (!instantiation_hint) {
       instantiation_hint = assume_class_of_expr(current_function, call_arg, call).assum_hint;
@@ -355,6 +349,16 @@ static void reify_genericsT_from_call_argument(FunctionPtr template_function, co
         call->instantiation_list->add_instantiationT(nameT, arg_assum.assum_hint->try_as<TypeHintArray>()->inner, call);
       }
     }
+  }
+
+  if (const auto *as_class_string = type_hint->try_as<TypeHintClassString>()) {
+    const std::string *v = GenTree::get_constexpr_string(call_arg);
+    kphp_error_return(v, "Expected ::class as a parameter, but got not a string");
+    ClassPtr klassT = G->get_class(*v);
+    kphp_error_return(klassT, fmt_format("Class {} not found", *v));
+    const auto *as_genericsT = as_class_string->inner->try_as<TypeHintGenericsT>();
+    kphp_assert(as_genericsT);
+    call->instantiation_list->add_instantiationT(as_genericsT->nameT, TypeHintInstance::create(klassT->name), call);
   }
 }
 

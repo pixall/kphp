@@ -7,9 +7,9 @@ class B {
 }
 
 /**
- * @kphp-template TName:class
- * @kphp-param TName $class_name
- * @kphp-return object<TName>
+ * @kphp-template TName
+ * @kphp-param class-string<TName> $class_name
+ * @kphp-return TName
  */
 function tplFWithLambda1($class_name) {
     // an error is missing use()

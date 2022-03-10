@@ -59,16 +59,11 @@ public:
 
     } else if (auto as_var = root.try_as<op_var>()) {
       auto param = template_function->find_param_by_name(as_var->str_val);
-      if (param && param->type_hint && param->type_hint->has_genericsT_inside()) {
-        if (const auto *as_genericsT = param->type_hint->try_as<TypeHintGenericsT>()) {
-          const TypeHint *extends_hint = template_function->generics_declaration->find(as_genericsT->nameT);
-          if (extends_hint->try_as<TypeHintConstexprSymbol>()) {
-            auto inst_param = find_param_by_name(as_var->str_val);
-            if (inst_param) {
-              if (const auto *provided_symbol = inst_param->type_hint->try_as<TypeHintConstexprSymbol>()) {
-                return GenTree::create_string_const(provided_symbol->constexpr_value);
-              }
-            }
+      if (param && param->type_hint && param->type_hint->has_genericsT_inside() && find_param_by_name(as_var->str_val)) {
+        if (const auto *as_class_string = param->type_hint->try_as<TypeHintClassString>()) {
+          const TypeHint *instT = generics_instantiation->find(as_class_string->inner->try_as<TypeHintGenericsT>()->nameT);
+          if (instT && instT->try_as<TypeHintInstance>()) {
+            return GenTree::create_string_const(instT->try_as<TypeHintInstance>()->full_class_name);
           }
         }
       }
@@ -134,11 +129,6 @@ static FunctionPtr instantiate_template_function(FunctionPtr template_function,
       kphp_error(instantiation_T->try_as<TypeHintCallable>(),
                  fmt_format("Invalid generics instantiation: expected {} to be {}, but {} found",
                             generics_item.nameT, TermStringFormat::paint_green(generics_item.extends_hint->as_human_readable()), TermStringFormat::paint_green(instantiation_T->as_human_readable())));
-    }
-    if (generics_item.extends_hint->try_as<TypeHintConstexprSymbol>()) {
-      kphp_error(instantiation_T->try_as<TypeHintConstexprSymbol>(),
-                 fmt_format("Invalid generics instantiation: expected {} to be a constexpr string",
-                            generics_item.nameT));
     }
   }
 

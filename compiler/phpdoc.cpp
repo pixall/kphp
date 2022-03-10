@@ -396,10 +396,17 @@ const TypeHint *PhpDocTypeHintParser::parse_simple_type() {
       return TypeHintOptional::create(parse_type_expression(), true, false);
     case tok_object:
       cur_tok++;
-      if (vk::any_of_equal(cur_tok->type(), tok_lt, tok_oppar)) {   // object<...>
-        return TypeHintObject::create(parse_nested_one_type_hint());
-      }
       return TypeHintPrimitive::create(tp_any);
+    case tok_class:
+      if ((cur_tok + 1)->type() == tok_minus && (cur_tok + 2)->type() == tok_string) {  // class-string<T>
+        cur_tok += 3;
+        const auto *nested = parse_nested_one_type_hint();
+        if (!nested->try_as<TypeHintGenericsT>()) {
+          throw std::runtime_error("class-string<> should contain generics T inside");
+        }
+        return TypeHintClassString::create(nested);
+      }
+      break;
 
     case tok_static:
     case tok_func_name:
@@ -448,8 +455,10 @@ const TypeHint *PhpDocTypeHintParser::parse_simple_type() {
       return parse_classname(std::string(cur_tok->str_val));
 
     default:
-      throw std::runtime_error(fmt_format("can't parse '{}'", cur_tok->str_val));
+      break;
   }
+
+  throw std::runtime_error(fmt_format("can't parse '{}'", cur_tok->str_val));
 }
 
 const TypeHint *PhpDocTypeHintParser::parse_arg_ref() {   // ^1, ^2[*][*], ^3()
@@ -770,8 +779,7 @@ const TypeHint *phpdoc_replace_genericsT_with_instantiation(const TypeHint *type
 
     if (const auto *as_genericsT = child->try_as<TypeHintGenericsT>()) {
       const TypeHint *replacement = generics_instantiation->find(as_genericsT->nameT);
-      kphp_assert(replacement);
-      return replacement;
+      return replacement ?: TypeHintPrimitive::create(tp_any);
     }
     if (const auto *as_field_ref = child->try_as<TypeHintFieldRef>()) {
       const auto *field = as_field_ref->resolve_field();

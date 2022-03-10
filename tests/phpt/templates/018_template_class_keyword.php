@@ -33,22 +33,22 @@ class D2 extends B {
 }
 
 /**
- * @kphp-template T, DstClass:class
+ * @kphp-template T, DstClass
  * @kphp-param T $obj
- * @kphp-param DstClass $to_classname
- * @kphp-return object<DstClass>
+ * @kphp-param class-string<DstClass> $to_classname
+ * @kphp-return DstClass
  */
 function my_cast($obj, $to_classname) {
     return instance_cast($obj, $to_classname);
 }
 
 /**
- * @kphp-template T, DstClass:class
+ * @kphp-template T, DstClass
  * @kphp-param T $obj
- * @kphp-param DstClass $if_classname
+ * @kphp-param class-string<DstClass> $if_classname
  */
 function callDMethodIfNotNull($obj, $if_classname) {
-    /** @var object<DstClass> */
+    /** @var DstClass */
     $casted = my_cast($obj, $if_classname);
     if ($casted)
         $casted->dMethod();
@@ -66,10 +66,10 @@ callDMethodIfNotNull(new D2, D1::class);
 callDMethodIfNotNull(new D2, D2::class);
 
 /**
- * @kphp-template TElem, ToName:class
+ * @kphp-template TElem, ToName
  * @kphp-param TElem[] $arr
- * @kphp-param ToName $to
- * @kphp-return object<ToName>[]
+ * @kphp-param class-string<ToName> $to
+ * @kphp-return ToName[]
  */
 function my_array_cast($arr, $to) {
     $out = [];
